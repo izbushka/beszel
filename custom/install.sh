@@ -3,12 +3,16 @@
 # systemd Linux host. Run as root from the directory that holds the binaries
 # made by custom/build.sh (beszel_linux_<arch>, beszel-agent_linux_<arch>).
 #
-#   install.sh hub   [--port 8090] [--bin PATH]
-#   install.sh agent [--key KEY] [--token TOKEN] [--hub-url URL] [--port 45876] [--bin PATH]
+#   install.sh hub   [--listen 127.0.0.1] [--port 8090] [--bin PATH]
+#   install.sh agent [--key KEY] [--token TOKEN] [--hub-url URL] [--port [ADDR:]45876] [--bin PATH]
 #   install.sh all   [agent options]     # hub + agent on this host
 #
 # A fresh agent install needs the hub's public key: --key, or, when the hub
 # is installed on this host, it is read from the hub's data directory.
+# The hub listens on 127.0.0.1 by default: put a TLS reverse proxy in front
+# of it, or pass --listen 0.0.0.0 to expose it directly. An agent installed
+# next to the hub listens on 127.0.0.1:45876 by default as well (agents
+# elsewhere connect out to the hub with --hub-url and --token).
 # On an existing install, only the given options are changed in the unit.
 # The binaries are built with no_self_update, so the upstream daily updater
 # (which would replace this build with vanilla Beszel) is switched off.
@@ -112,10 +116,11 @@ restart_and_check() {
 }
 
 install_hub() {
-  local port=8090 port_set=false bin="" unit=/etc/systemd/system/beszel-hub.service
+  local port="" listen="" bin="" unit=/etc/systemd/system/beszel-hub.service cur
   while [ $# -gt 0 ]; do
     case "$1" in
-    --port) port=$2; port_set=true; shift 2 ;;
+    --listen) listen=$2; shift 2 ;;
+    --port) port=$2; shift 2 ;;
     --bin) bin=$2; shift 2 ;;
     -h | --help) usage ;;
     *) die "unknown option for hub: $1" ;;
@@ -137,7 +142,7 @@ Description=Beszel Hub Service
 After=network.target
 
 [Service]
-ExecStart=$HUB_DIR/beszel serve --http "0.0.0.0:$port"
+ExecStart=$HUB_DIR/beszel serve --http "${listen:-127.0.0.1}:${port:-8090}"
 WorkingDirectory=$HUB_DIR
 User=beszel
 Restart=always
@@ -146,8 +151,16 @@ RestartSec=5
 [Install]
 WantedBy=multi-user.target
 EOF
-  elif $port_set; then
-    sed -i "s|--http \"[^\"]*\"|--http \"0.0.0.0:$port\"|" "$unit"
+  else
+    # current address from the unit, e.g. 0.0.0.0:8090
+    cur=$(sed -n 's|.*--http "\([^"]*\)".*|\1|p' "$unit" | head -n1)
+    if [ -n "$listen$port" ]; then
+      listen=${listen:-${cur%:*}}
+      port=${port:-${cur##*:}}
+      sed -i "s|--http \"[^\"]*\"|--http \"${listen:-127.0.0.1}:${port:-8090}\"|" "$unit"
+    elif [ "${cur%:*}" = 0.0.0.0 ]; then
+      info "Hub listens on $cur (all interfaces); --listen 127.0.0.1 limits it to this host"
+    fi
   fi
   restart_and_check beszel-hub.service
   local key
@@ -171,6 +184,9 @@ install_agent() {
     esac
   done
   bin=${bin:-$SCRIPT_DIR/beszel-agent_linux_$(detect_arch)}
+  # next to the hub, the hub reaches the agent over localhost
+  local default_port=45876
+  [ -x "$HUB_DIR/beszel" ] && default_port=127.0.0.1:45876
   if [ ! -f "$unit" ] && [ -z "$key" ]; then
     key=$(hub_pubkey) || die "fresh agent install needs --key (the hub's public key)"
     info "Using the public key of the hub on this host"
@@ -193,7 +209,7 @@ Wants=network-online.target
 After=network-online.target
 
 [Service]
-Environment="PORT=${port:-45876}"
+Environment="PORT=${port:-$default_port}"
 Environment="KEY=$key"
 Environment="TOKEN=$token"
 Environment="HUB_URL=$hub_url"
@@ -223,6 +239,10 @@ EOF
     getent group systemd-journal >/dev/null 2>&1 || sed -i '/^SupplementaryGroups=/d' "$unit"
   else
     [ -n "$port" ] && set_env "$unit" PORT "$port"
+    if [ -z "$port" ] && [ "$default_port" != 45876 ] &&
+      grep -q '^Environment="PORT=:\{0,1\}[0-9]*"' "$unit"; then
+      info "Agent listens on all interfaces; --port 127.0.0.1:45876 limits it to this host"
+    fi
     [ -n "$key" ] && set_env "$unit" KEY "$key"
     [ -n "$token" ] && set_env "$unit" TOKEN "$token"
     [ -n "$hub_url" ] && set_env "$unit" HUB_URL "$hub_url"
