@@ -2,7 +2,7 @@ import { i18n } from "@lingui/core"
 import { plural, t } from "@lingui/core/macro"
 import { type ClassValue, clsx } from "clsx"
 import { listenKeys } from "nanostores"
-import { timeDay, timeHour, timeMinute } from "d3-time"
+import { timeDay, timeHour, timeMinute, timeYear } from "d3-time"
 import { useEffect, useState } from "react"
 import { twMerge } from "tailwind-merge"
 import { toast } from "@/components/ui/use-toast"
@@ -96,6 +96,14 @@ export const formatDay = (timestamp: string) => {
 	return dayFormatter.format(new Date(timestamp))
 }
 
+const monthFormatter = new Intl.DateTimeFormat(undefined, {
+	month: "short",
+	year: "2-digit",
+})
+export const formatMonth = (timestamp: string) => {
+	return monthFormatter.format(new Date(timestamp))
+}
+
 export const updateFavicon = (() => {
 	let prevDownCount = 0
 	return (downCount = 0) => {
@@ -174,6 +182,14 @@ export const chartTimeData: ChartTimeData = {
 		ticks: 30,
 		format: (timestamp: string) => formatDay(timestamp),
 		getOffset: (endTime: Date) => timeDay.offset(endTime, -30),
+	},
+	"1y": {
+		type: "480m",
+		expectedInterval: 60_000 * 480,
+		label: () => t`1 year`,
+		ticks: 12,
+		format: (timestamp: string) => formatMonth(timestamp),
+		getOffset: (endTime: Date) => timeYear.offset(endTime, -1),
 	},
 }
 
