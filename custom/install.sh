@@ -69,7 +69,9 @@ install_binary() {
   [ -f "$src" ] || die "binary not found: $src"
   "$src" -v >/dev/null 2>&1 ||
     die "$src does not run on this host (wrong architecture?)"
-  mkdir -p "$(dirname "$dest")"
+  # explicit mode: a strict root umask (027/077) would hide the binary from the service user
+  install -d -m 755 "$(dirname "$dest")"
+  chmod 755 "$(dirname "$dest")"
   [ -f "$dest" ] && cp -p "$dest" "$dest.bak"
   tmp=$(mktemp "$dest.XXXXXX")
   install -m 755 "$src" "$tmp"
@@ -249,7 +251,7 @@ EOF
   fi
 
   # Custom metrics: a directory for producers and a starter config.
-  mkdir -p "$AGENT_DATA/metrics"
+  install -d -m 755 "$AGENT_DATA/metrics"
   chmod 755 "$AGENT_DATA/metrics"
   if [ ! -f "$AGENT_DATA/config.yml" ]; then
     info "Creating $AGENT_DATA/config.yml"
